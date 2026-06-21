@@ -9,6 +9,20 @@ A minimal, fast Markdown viewer built with Tauri + TypeScript.
 - Reload the current file (`⌘R` / `Ctrl+R`)
 - Open files via button or `⌘O` / `Ctrl+O`
 
+## Install
+
+Download a build for your platform from the [Releases](https://github.com/MR-TABATA/mdcrud/releases) page.
+
+The binaries are **not code-signed yet**, so your OS may warn you on first launch. To run anyway:
+
+- **macOS** — the first time, right-click (or Control-click) the app and choose **Open**, then confirm. After that it launches normally. If macOS still blocks it, run:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/mdcrud.app
+  ```
+
+- **Windows** — on the SmartScreen prompt, click **More info → Run anyway**.
+
 ## Development
 
 ```bash
