@@ -26,7 +26,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let window = app.get_webview_window("main").unwrap();
-                window.set_title("MD Viewer").unwrap();
+                window.set_title("mdcrud").unwrap();
             }
             Ok(())
         })

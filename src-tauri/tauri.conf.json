@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MD Viewer",
+  "productName": "mdcrud",
   "version": "0.1.2",
-  "identifier": "com.hitoshi.md-viewer",
+  "identifier": "com.hitoshi.mdcrud",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "md-viewer",
+        "title": "mdcrud",
         "width": 800,
         "height": 600
       }

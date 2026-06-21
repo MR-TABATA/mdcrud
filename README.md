@@ -1,4 +1,4 @@
-# MD Viewer
+# mdcrud
 
 A minimal, fast Markdown viewer built with Tauri + TypeScript.
 

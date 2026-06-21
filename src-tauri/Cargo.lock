@@ -1680,7 +1680,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "md-viewer"
+name = "mdcrud"
 version = "0.1.2"
 dependencies = [
  "serde",
