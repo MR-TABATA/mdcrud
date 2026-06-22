@@ -40,6 +40,14 @@
         "role": "Viewer",
         "mimeType": "text/markdown"
       }
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "language": ["en-US", "ja-JP"]
+      },
+      "nsis": {
+        "languages": ["English", "Japanese"]
+      }
+    }
   }
 }
