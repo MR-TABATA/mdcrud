@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -44,4 +45,15 @@ document.addEventListener('keydown', async (e) => {
     e.preventDefault();
     await renderFile(currentFilePath);
   }
+});
+
+// Open files passed by the OS via double-click / "Open With".
+// Runtime opens (app already running) arrive as an event...
+listen<string>('open-file', (e) => {
+  if (e.payload) renderFile(e.payload);
+});
+
+// ...while a file the app was launched with is fetched once on startup.
+invoke<string | null>('get_pending_file').then((path) => {
+  if (path) renderFile(path);
 });

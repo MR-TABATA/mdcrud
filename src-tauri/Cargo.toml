@@ -1,6 +1,6 @@
 [package]
 name = "mdcrud"
-version = "0.1.0"
+version = "0.1.1"
 description = "A minimal Markdown viewer"
 authors = ["hitoshi"]
 edition = "2021"
