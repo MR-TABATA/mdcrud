@@ -55,6 +55,9 @@
       "nsis": {
         "languages": ["English", "Japanese"]
       }
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   }
 }
