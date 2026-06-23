@@ -25,6 +25,55 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Last-modified time of a file in milliseconds, used by the frontend to poll
+/// for external edits and auto-reload.
+#[tauri::command]
+fn file_mtime(path: String) -> Result<u64, String> {
+    let modified = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .map_err(|e| e.to_string())?;
+    modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .map_err(|e| e.to_string())
+}
+
+const MAX_RECENT: usize = 10;
+
+fn recent_store(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("recent.json"))
+}
+
+/// Most-recently-opened file paths, newest first.
+#[tauri::command]
+fn get_recent_files(app: tauri::AppHandle) -> Vec<String> {
+    recent_store(&app)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Record an opened file at the front of the recent list (deduped, capped).
+#[tauri::command]
+fn add_recent_file(app: tauri::AppHandle, path: String) -> Vec<String> {
+    let mut list = get_recent_files(app.clone());
+    list.retain(|p| p != &path);
+    list.insert(0, path);
+    list.truncate(MAX_RECENT);
+    if let Some(store) = recent_store(&app) {
+        if let Some(dir) = store.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(json) = serde_json::to_string(&list) {
+            let _ = std::fs::write(store, json);
+        }
+    }
+    list
+}
+
 /// Called by the frontend on startup to retrieve the file the app was launched
 /// with (if any), covering both the CLI-argument and macOS "Opened" cases.
 #[tauri::command]
@@ -50,7 +99,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(PendingFile::default())
-        .invoke_handler(tauri::generate_handler![read_file, get_pending_file])
+        .invoke_handler(tauri::generate_handler![
+            read_file,
+            file_mtime,
+            get_recent_files,
+            add_recent_file,
+            get_pending_file
+        ])
         .setup(|app| {
             #[cfg(desktop)]
             {
