@@ -9,6 +9,7 @@ A minimal, fast Markdown viewer built with Tauri + TypeScript.
 - Auto-reloads when the open file changes on disk (scroll position preserved)
 - Recent files list on the start screen for quick reopening
 - Renders tables, code blocks, quotes, and local images (relative paths resolve against the file)
+- Renders [Mermaid](https://mermaid.js.org/) diagrams in ```` ```mermaid ```` code blocks (lazy-loaded; falls back to source on syntax errors)
 - Links stay in the app: external links open in your browser, in-document anchors scroll
 - HTML output sanitized with DOMPurify and locked down with a strict CSP (safe to open untrusted files)
 - Reload the current file (`⌘R` / `Ctrl+R`)

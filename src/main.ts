@@ -43,6 +43,57 @@ function addHeadingIds() {
   });
 }
 
+// Lazily load Mermaid only when a document actually contains a diagram, so the
+// large dependency never slows down opening plain Markdown.
+let mermaidLoader: Promise<typeof import('mermaid')['default']> | null = null;
+function getMermaid() {
+  if (!mermaidLoader) {
+    mermaidLoader = import('mermaid').then(({ default: mermaid }) => {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'strict',
+        // Throw on invalid input instead of injecting Mermaid's "bomb" graphic,
+        // so our own fallback handles errors.
+        suppressErrorRendering: true,
+      });
+      return mermaid;
+    });
+  }
+  return mermaidLoader;
+}
+
+// Turn ```mermaid code blocks into rendered diagrams (falling back to the
+// source on error so a bad diagram never blanks the document).
+async function renderMermaid() {
+  const blocks = Array.from(output.querySelectorAll('code.language-mermaid'));
+  if (blocks.length === 0) return;
+  const mermaid = await getMermaid();
+  let i = 0;
+  for (const block of blocks) {
+    const host = block.closest('pre') ?? block;
+    const source = block.textContent || '';
+    try {
+      // Validate first so invalid diagrams never reach render() (no DOM injection).
+      if ((await mermaid.parse(source, { suppressErrors: true })) === false) {
+        throw new Error('Invalid Mermaid syntax');
+      }
+      const { svg } = await mermaid.render(`mermaid-${Date.now()}-${i++}`, source);
+      const diagram = document.createElement('div');
+      diagram.className = 'mermaid-diagram';
+      diagram.innerHTML = svg;
+      host.replaceWith(diagram);
+    } catch (e) {
+      const fallback = document.createElement('div');
+      fallback.className = 'mermaid-error';
+      const msg = document.createElement('p');
+      msg.textContent = `Mermaid render error: ${e instanceof Error ? e.message : e}`;
+      fallback.append(msg, host.cloneNode(true));
+      host.replaceWith(fallback);
+    }
+  }
+}
+
 // Resolve local (relative/absolute) image paths against the file's directory
 // and route them through the asset protocol so they actually load.
 function resolveLocalImages(filePath: string) {
@@ -71,6 +122,7 @@ async function renderFile(filePath: string, opts: { preserveScroll?: boolean } =
   output.innerHTML = DOMPurify.sanitize(html);
   addHeadingIds();
   resolveLocalImages(filePath);
+  await renderMermaid();
   output.style.display = 'block';
   emptyState.style.display = 'none';
   (reloadBtn as HTMLButtonElement).disabled = false;

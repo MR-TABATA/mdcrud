@@ -129,6 +129,12 @@ button:disabled { opacity: 0.3; cursor: default; }
 #output th { background: #2d2d2d; color: #e2e2e2; }
 #output tr:nth-child(even) td { background: #252525; }
 #output img { max-width: 100%; border-radius: 6px; }
+#output .mermaid-diagram { margin: 1em 0; text-align: center; }
+#output .mermaid-diagram svg { max-width: 100%; height: auto; }
+#output .mermaid-error {
+  border: 1px solid #5a3a3a; border-radius: 8px; padding: 12px; margin: 1em 0;
+}
+#output .mermaid-error p { color: #e06c6c; font-size: 0.85em; margin: 0 0 8px; }
 #output hr { border: none; border-top: 1px solid #333; margin: 2em 0; }
 #output {
   -webkit-user-select: text;

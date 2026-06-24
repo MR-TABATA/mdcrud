@@ -1,7 +1,7 @@
 {
   "name": "mdcrud",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "dompurify": "^3.4.11",
-    "marked": "^18.0.5"
+    "marked": "^18.0.5",
+    "mermaid": "^11.15.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
