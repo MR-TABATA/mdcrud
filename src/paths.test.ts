@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSupported, basename, dirname, tildify, resolveImagePath } from './paths';
+import { isSupported, basename, dirname, tildify, resolveImagePath, sanitizeFilename } from './paths';
 
 describe('isSupported', () => {
   it('accepts markdown extensions case-insensitively', () => {
@@ -30,6 +30,20 @@ describe('dirname', () => {
   it('returns empty when there is no directory', () => {
     expect(dirname('a.md')).toBe('');
     expect(dirname('/a.md')).toBe('');
+  });
+});
+
+describe('sanitizeFilename', () => {
+  it('replaces path separators and reserved characters', () => {
+    expect(sanitizeFilename('a/b:c?')).toBe('a-b-c-');
+    expect(sanitizeFilename('Plan: Q3 <draft>')).toBe('Plan- Q3 -draft-');
+  });
+  it('collapses whitespace and trims', () => {
+    expect(sanitizeFilename('  My   Notes  ')).toBe('My Notes');
+  });
+  it('falls back to untitled when nothing usable remains', () => {
+    expect(sanitizeFilename('   ')).toBe('untitled');
+    expect(sanitizeFilename('...')).toBe('untitled');
   });
 });
 

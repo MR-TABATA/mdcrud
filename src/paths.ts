@@ -18,6 +18,22 @@ export function dirname(path: string): string {
   return i <= 0 ? '' : path.slice(0, i);
 }
 
+/**
+ * Turn arbitrary heading text into a safe file name (no path separators or
+ * characters Windows forbids), collapsed and length-capped. Falls back to
+ * `untitled` when nothing usable remains.
+ */
+export function sanitizeFilename(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '')
+    .slice(0, 80)
+    .trim();
+  return cleaned || 'untitled';
+}
+
 /** Abbreviate the home-directory prefix to `~` (home should have no trailing slash). */
 export function tildify(path: string, home: string): string {
   if (home && (path === home || path.startsWith(`${home}/`))) {

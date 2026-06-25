@@ -7,8 +7,18 @@ import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { SUPPORTED, isSupported, basename, tildify, resolveImagePath } from './paths';
-import { slugify } from './markdown';
+import { SUPPORTED, isSupported, basename, tildify, resolveImagePath, sanitizeFilename } from './paths';
+import { slugify, firstHeadingTitle } from './markdown';
+import {
+  toggleWrap,
+  toggleLinePrefix,
+  insertLink,
+  insertImage,
+  insertFence,
+  insertTable,
+  insertHr,
+  type Sel,
+} from './editor-ops';
 
 const sidebarBtn = document.getElementById('sidebar-btn')!;
 const openBtn = document.getElementById('open-btn')!;
@@ -18,6 +28,11 @@ const editBtn = document.getElementById('edit-btn') as HTMLButtonElement;
 const editLabel = document.getElementById('edit-label')!;
 const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
 const editor = document.getElementById('editor') as HTMLTextAreaElement;
+const formatBar = document.getElementById('format-bar')!;
+const settingsBtn = document.getElementById('settings-btn')!;
+const settingsOverlay = document.getElementById('settings-overlay') as HTMLElement;
+const settingsClose = document.getElementById('settings-close')!;
+const toolbarOptions = document.getElementById('toolbar-options')!;
 const output = document.getElementById('output')!;
 const emptyState = document.getElementById('empty-state')!;
 const recentBox = document.getElementById('recent')!;
@@ -317,8 +332,12 @@ async function save() {
 
   let path = active.path;
   if (!path) {
+    // Suggest a file name from the document's first heading, falling back to
+    // the untitled buffer name.
+    const title = firstHeadingTitle(active.workingText);
+    const base = title ? sanitizeFilename(title) : active.name;
     const chosen = await saveDialog({
-      defaultPath: `${active.name}.md`,
+      defaultPath: `${base}.md`,
       filters: [{ name: 'Markdown', extensions: SUPPORTED }]
     });
     if (!chosen) return; // cancelled
@@ -421,6 +440,209 @@ editor.addEventListener('input', () => {
   }, 250);
 });
 
+// Replace the editor's text through execCommand so the change lands on the
+// WebView's native undo stack — assigning `editor.value` directly would wipe
+// it, breaking ⌘Z and Edit ▸ Undo. Only the differing middle span is replaced
+// (common prefix/suffix preserved). Falls back to a plain assignment if the
+// command is unavailable.
+function replaceEditorText(newText: string, selStart: number, selEnd: number) {
+  const old = editor.value;
+  let p = 0;
+  while (p < old.length && p < newText.length && old[p] === newText[p]) p++;
+  let s = 0;
+  while (
+    s < old.length - p &&
+    s < newText.length - p &&
+    old[old.length - 1 - s] === newText[newText.length - 1 - s]
+  ) {
+    s++;
+  }
+  editor.focus();
+  editor.setSelectionRange(p, old.length - s);
+  if (!document.execCommand('insertText', false, newText.slice(p, newText.length - s))) {
+    editor.value = newText;
+  }
+  editor.setSelectionRange(selStart, selEnd);
+}
+
+// All Markdown formatting actions the toolbar can offer. `group` drives the
+// visual separators (inline vs. block) and the grouping in Settings; `run`
+// transforms the current selection. Registry order is the display order.
+interface FmtAction {
+  id: string;
+  title: string;
+  group: 'inline' | 'block';
+  svg: string;
+  run: (s: Sel) => Sel;
+}
+
+const ICON =
+  (paths: string, attrs = 'fill="none" stroke="currentColor" stroke-width="2"') =>
+    `<svg viewBox="0 0 24 24" ${attrs}>${paths}</svg>`;
+
+const FMT_ACTIONS: FmtAction[] = [
+  { id: 'bold', title: '太字', group: 'inline',
+    svg: ICON('<path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>'),
+    run: (s) => toggleWrap(s, '**') },
+  { id: 'italic', title: '斜体', group: 'inline',
+    svg: ICON('<line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/>'),
+    run: (s) => toggleWrap(s, '*') },
+  { id: 'strike', title: '取り消し線', group: 'inline',
+    svg: ICON('<path d="M16 5H9a3 3 0 0 0-2.8 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" y1="12" x2="20" y2="12"/>'),
+    run: (s) => toggleWrap(s, '~~') },
+  { id: 'code', title: 'コード', group: 'inline',
+    svg: ICON('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>'),
+    run: (s) => toggleWrap(s, '`') },
+  { id: 'link', title: 'リンク', group: 'inline',
+    svg: ICON('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    run: (s) => insertLink(s) },
+  { id: 'image', title: '画像', group: 'inline',
+    svg: ICON('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
+    run: (s) => insertImage(s) },
+  { id: 'heading', title: '見出し', group: 'block',
+    svg: ICON('<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>'),
+    run: (s) => toggleLinePrefix(s, '# ', /^#{1,6} /) },
+  { id: 'list', title: 'リスト', group: 'block',
+    svg: ICON('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'),
+    run: (s) => toggleLinePrefix(s, '- ', /^[-*+] /) },
+  { id: 'ordered', title: '番号付きリスト', group: 'block',
+    svg: ICON('<line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18v-1a1 1 0 0 0-2 0M4 18h2"/>'),
+    run: (s) => toggleLinePrefix(s, '1. ', /^\d+\. /) },
+  { id: 'checklist', title: 'チェックリスト', group: 'block',
+    svg: ICON('<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
+    run: (s) => toggleLinePrefix(s, '- [ ] ', /^[-*+] \[[ xX]\] /) },
+  { id: 'quote', title: '引用', group: 'block',
+    svg: ICON('<path d="M7 17h3l2-4V7H6v6h3zm8 0h3l2-4V7h-6v6h3z"/>', 'fill="currentColor" stroke="none"'),
+    run: (s) => toggleLinePrefix(s, '> ', /^> /) },
+  { id: 'codeblock', title: 'コードブロック', group: 'block',
+    svg: ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="9 9 7 12 9 15"/><polyline points="15 9 17 12 15 15"/>'),
+    run: (s) => insertFence(s) },
+  { id: 'table', title: '表', group: 'block',
+    svg: ICON('<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>'),
+    run: (s) => insertTable(s) },
+  { id: 'hr', title: '水平線', group: 'block',
+    svg: ICON('<line x1="3" y1="12" x2="21" y2="12"/>'),
+    run: (s) => insertHr(s) },
+];
+const FMT_BY_ID = new Map(FMT_ACTIONS.map((a) => [a.id, a]));
+const FMT_DEFAULT = ['heading', 'bold', 'italic', 'code', 'list', 'quote', 'link'];
+const GROUP_LABEL: Record<FmtAction['group'], string> = { inline: 'インライン', block: 'ブロック' };
+
+// Which buttons the user has chosen to show, persisted across sessions and
+// always kept in registry order.
+const TOOLBAR_KEY = 'mdcrud.toolbar';
+function enabledIds(): string[] {
+  const raw = localStorage.getItem(TOOLBAR_KEY);
+  if (raw) {
+    try {
+      const ids = JSON.parse(raw);
+      if (Array.isArray(ids)) return FMT_ACTIONS.filter((a) => ids.includes(a.id)).map((a) => a.id);
+    } catch {
+      // fall through to default
+    }
+  }
+  return FMT_DEFAULT;
+}
+
+function renderFormatBar() {
+  const enabled = new Set(enabledIds());
+  formatBar.innerHTML = '';
+  let prevGroup: string | null = null;
+  for (const a of FMT_ACTIONS) {
+    if (!enabled.has(a.id)) continue;
+    if (prevGroup && a.group !== prevGroup) {
+      const sep = document.createElement('span');
+      sep.className = 'format-sep';
+      formatBar.appendChild(sep);
+    }
+    prevGroup = a.group;
+    const btn = document.createElement('button');
+    btn.dataset.fmt = a.id;
+    const key = a.id === 'bold' ? ' (⌘B)' : a.id === 'italic' ? ' (⌘I)' : '';
+    btn.title = a.title + key;
+    btn.innerHTML = a.svg;
+    formatBar.appendChild(btn);
+  }
+}
+
+// Apply a Markdown formatting action to the editor's current selection, then
+// re-sync the model and preview as if the text had been typed.
+function applyFmt(id: string) {
+  if (!active) return;
+  const action = FMT_BY_ID.get(id);
+  if (!action) return;
+  if (!isEditing) setEditing(true);
+  const before: Sel = { text: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
+  const after = action.run(before);
+  replaceEditorText(after.text, after.start, after.end);
+  active.workingText = editor.value;
+  updateStatus();
+  if (isDirty(active) !== lastActiveDirty) {
+    lastActiveDirty = isDirty(active);
+    renderSidebar();
+  }
+  renderSource(active.workingText, active.path ?? '');
+}
+
+formatBar.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  const kind = btn?.dataset.fmt;
+  if (kind) applyFmt(kind);
+});
+
+// --- Settings (⌘,): customise which formatting buttons show ---
+
+function buildToolbarOptions() {
+  const enabled = new Set(enabledIds());
+  toolbarOptions.innerHTML = '';
+  let prevGroup: string | null = null;
+  for (const a of FMT_ACTIONS) {
+    if (a.group !== prevGroup) {
+      const head = document.createElement('div');
+      head.className = 'opt-group-title';
+      head.textContent = GROUP_LABEL[a.group];
+      toolbarOptions.appendChild(head);
+      prevGroup = a.group;
+    }
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = enabled.has(a.id);
+    cb.addEventListener('change', () => {
+      const next = FMT_ACTIONS.filter((x) =>
+        x.id === a.id ? cb.checked : enabled.has(x.id)
+      ).map((x) => x.id);
+      enabled.clear();
+      next.forEach((id) => enabled.add(id));
+      localStorage.setItem(TOOLBAR_KEY, JSON.stringify(next));
+      renderFormatBar();
+    });
+    const icon = document.createElement('span');
+    icon.className = 'opt-icon';
+    icon.innerHTML = a.svg;
+    const name = document.createElement('span');
+    name.textContent = a.title;
+    label.append(cb, icon, name);
+    toolbarOptions.appendChild(label);
+  }
+}
+
+function openSettings() {
+  buildToolbarOptions();
+  settingsOverlay.hidden = false;
+}
+function closeSettings() {
+  settingsOverlay.hidden = true;
+}
+
+settingsBtn.addEventListener('click', openSettings);
+settingsClose.addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) closeSettings();
+});
+
+renderFormatBar();
+
 // --- Sidebar visibility (default shown, persisted when hidden) ---
 const SIDEBAR_KEY = 'mdcrud.sidebar';
 document.body.classList.toggle('sidebar-hidden', localStorage.getItem(SIDEBAR_KEY) === 'hidden');
@@ -431,8 +653,17 @@ sidebarBtn.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', async (e) => {
+  if (e.key === 'Escape' && !settingsOverlay.hidden) {
+    closeSettings();
+    return;
+  }
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
+  if (e.key === ',') {
+    e.preventDefault();
+    settingsOverlay.hidden ? openSettings() : closeSettings();
+    return;
+  }
   if (e.key === 'o') {
     e.preventDefault();
     openBtn.click();
@@ -454,6 +685,12 @@ document.addEventListener('keydown', async (e) => {
   } else if (e.key === 'w' && active) {
     e.preventDefault();
     closeDoc(active);
+  } else if (e.key === 'b' && active && isEditing) {
+    e.preventDefault();
+    applyFmt('bold');
+  } else if (e.key === 'i' && active && isEditing) {
+    e.preventDefault();
+    applyFmt('italic');
   }
 });
 
