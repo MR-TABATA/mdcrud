@@ -1,7 +1,7 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -10,6 +10,7 @@ import { slugify } from './markdown';
 
 const sidebarBtn = document.getElementById('sidebar-btn')!;
 const openBtn = document.getElementById('open-btn')!;
+const newBtn = document.getElementById('new-btn')!;
 const reloadBtn = document.getElementById('reload-btn') as HTMLButtonElement;
 const editBtn = document.getElementById('edit-btn') as HTMLButtonElement;
 const editLabel = document.getElementById('edit-label')!;
@@ -24,9 +25,11 @@ const docList = document.getElementById('doc-list')!;
 const contentArea = document.querySelector('.content-area') as HTMLElement;
 
 // A document open in the session. `workingText` is the editor buffer, which
-// may differ from what's on disk (`savedSource`) until saved.
+// may differ from what's on disk (`savedSource`) until saved. `path` is null
+// for a new, never-saved ("untitled") document.
 interface Doc {
-  path: string;
+  path: string | null;
+  name: string;
   savedSource: string;
   workingText: string;
   mtime: number;
@@ -36,6 +39,7 @@ let docs: Doc[] = [];
 let active: Doc | null = null;
 let isEditing = false;
 let lastActiveDirty = false;
+let untitledCount = 0;
 
 const isDirty = (d: Doc) => d.workingText !== d.savedSource;
 
@@ -156,7 +160,7 @@ function updateStatus() {
     dot.textContent = '●';
     filepath.appendChild(dot);
   }
-  filepath.append(basename(active.path));
+  filepath.append(active.name);
 }
 
 function setEditing(on: boolean) {
@@ -174,11 +178,11 @@ function renderSidebar() {
     const li = document.createElement('li');
     if (doc === active) li.classList.add('active');
     if (isDirty(doc)) li.classList.add('dirty');
-    li.title = doc.path;
+    li.title = doc.path ?? doc.name;
 
     const name = document.createElement('span');
     name.className = 'doc-name';
-    name.textContent = basename(doc.path);
+    name.textContent = doc.name;
 
     const close = document.createElement('span');
     close.className = 'doc-close';
@@ -205,7 +209,9 @@ function renderSidebar() {
 
 const SESSION_KEY = 'mdcrud.session';
 function saveSession() {
-  const data = { paths: docs.map((d) => d.path), active: active?.path ?? null };
+  // Only on-disk documents can be restored; untitled buffers are not persisted.
+  const paths = docs.map((d) => d.path).filter((p): p is string => p !== null);
+  const data = { paths, active: active?.path ?? null };
   localStorage.setItem(SESSION_KEY, JSON.stringify(data));
 }
 
@@ -217,7 +223,7 @@ async function setActive(doc: Doc) {
   active = doc;
   lastActiveDirty = isDirty(doc);
   editor.value = doc.workingText;
-  await renderSource(doc.workingText, doc.path);
+  await renderSource(doc.workingText, doc.path ?? '');
   showDocUI();
   updateStatus();
   renderSidebar();
@@ -240,7 +246,7 @@ async function openFile(path: string) {
     return;
   }
   const mtime = await invoke<number>('file_mtime', { path }).catch(() => 0);
-  const doc: Doc = { path, savedSource: content, workingText: content, mtime };
+  const doc: Doc = { path, name: basename(path), savedSource: content, workingText: content, mtime };
   docs.push(doc);
   active = doc;
   lastActiveDirty = false;
@@ -255,7 +261,7 @@ async function openFile(path: string) {
 }
 
 async function closeDoc(doc: Doc) {
-  if (isDirty(doc) && !confirm(`「${basename(doc.path)}」は未保存です。閉じますか？`)) {
+  if (isDirty(doc) && !confirm(`「${doc.name}」は未保存です。閉じますか？`)) {
     return;
   }
   const idx = docs.indexOf(doc);
@@ -271,24 +277,60 @@ async function closeDoc(doc: Doc) {
   saveSession();
 }
 
+// Create a new, empty "untitled" document and start editing it.
+function newDoc() {
+  untitledCount++;
+  const name = untitledCount === 1 ? 'untitled' : `untitled ${untitledCount}`;
+  const doc: Doc = { path: null, name, savedSource: '', workingText: '', mtime: 0 };
+  docs.push(doc);
+  active = doc;
+  lastActiveDirty = false;
+  editor.value = '';
+  renderSource('', '');
+  showDocUI();
+  setEditing(true);
+  updateStatus();
+  renderSidebar();
+  saveSession();
+  contentArea.scrollTop = 0;
+}
+
 async function save() {
-  if (!active || !isDirty(active)) return;
+  if (!active) return;
+  // Titled doc with no changes: nothing to do. Untitled always offers a save.
+  if (active.path && !isDirty(active)) return;
+
+  let path = active.path;
+  if (!path) {
+    const chosen = await saveDialog({
+      defaultPath: `${active.name}.md`,
+      filters: [{ name: 'Markdown', extensions: SUPPORTED }]
+    });
+    if (!chosen) return; // cancelled
+    path = chosen;
+  }
+
   try {
-    await invoke('save_file', { path: active.path, content: active.workingText });
+    await invoke('save_file', { path, content: active.workingText });
   } catch (e) {
     filepath.textContent = `保存できませんでした: ${e}`;
     return;
   }
+
+  active.path = path;
+  active.name = basename(path);
   active.savedSource = active.workingText;
-  active.mtime = await invoke<number>('file_mtime', { path: active.path }).catch(() => 0);
+  active.mtime = await invoke<number>('file_mtime', { path }).catch(() => 0);
   lastActiveDirty = false;
   updateStatus();
   renderSidebar();
+  saveSession();
+  invoke<string[]>('add_recent_file', { path }).then(renderRecent).catch(() => {});
 }
 
 // Re-read the active document from disk into the editor and preview.
 async function refreshActiveFromDisk(preserveScroll: boolean) {
-  if (!active) return;
+  if (!active || !active.path) return;
   const content = await invoke<string>('read_file', { path: active.path }).catch(() => null);
   if (content == null) return;
   const scrollTop = contentArea.scrollTop;
@@ -305,7 +347,7 @@ async function refreshActiveFromDisk(preserveScroll: boolean) {
 
 // Re-read from disk, but never silently discard unsaved edits.
 async function reload() {
-  if (!active || isDirty(active)) return;
+  if (!active || !active.path || isDirty(active)) return;
   await refreshActiveFromDisk(true);
 }
 
@@ -341,6 +383,7 @@ openBtn.addEventListener('click', async () => {
   if (selected) await openFile(selected as string);
 });
 
+newBtn.addEventListener('click', newDoc);
 reloadBtn.addEventListener('click', reload);
 saveBtn.addEventListener('click', save);
 editBtn.addEventListener('click', () => {
@@ -359,7 +402,7 @@ editor.addEventListener('input', () => {
   }
   clearTimeout(previewTimer);
   previewTimer = window.setTimeout(() => {
-    if (active) renderSource(active.workingText, active.path);
+    if (active) renderSource(active.workingText, active.path ?? '');
   }, 250);
 });
 
@@ -378,6 +421,9 @@ document.addEventListener('keydown', async (e) => {
   if (e.key === 'o') {
     e.preventDefault();
     openBtn.click();
+  } else if (e.key === 'n') {
+    e.preventDefault();
+    newDoc();
   } else if (e.key === 's') {
     e.preventDefault();
     await save();
@@ -453,7 +499,7 @@ getCurrentWebview().onDragDropEvent((event) => {
 // Auto-reload: re-render when the active file changes on disk. Paused while
 // editing or with unsaved changes so it never clobbers the user's work.
 setInterval(async () => {
-  if (!active || isEditing || isDirty(active)) return;
+  if (!active || !active.path || isEditing || isDirty(active)) return;
   try {
     const m = await invoke<number>('file_mtime', { path: active.path });
     if (m > active.mtime) await refreshActiveFromDisk(true);
@@ -476,7 +522,7 @@ async function restoreSession() {
     try {
       const content = await invoke<string>('read_file', { path: p });
       const mtime = await invoke<number>('file_mtime', { path: p }).catch(() => 0);
-      docs.push({ path: p, savedSource: content, workingText: content, mtime });
+      docs.push({ path: p, name: basename(p), savedSource: content, workingText: content, mtime });
     } catch {
       // Skip files that no longer exist.
     }
@@ -486,7 +532,7 @@ async function restoreSession() {
     active = target;
     lastActiveDirty = false;
     editor.value = target.workingText;
-    await renderSource(target.workingText, target.path);
+    await renderSource(target.workingText, target.path ?? '');
     showDocUI();
     updateStatus();
   }
