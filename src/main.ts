@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { homeDir } from '@tauri-apps/api/path';
-import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { open, save as saveDialog, confirm as confirmDialog } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -27,6 +27,7 @@ const reloadBtn = document.getElementById('reload-btn') as HTMLButtonElement;
 const editBtn = document.getElementById('edit-btn') as HTMLButtonElement;
 const editLabel = document.getElementById('edit-label')!;
 const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
+const deleteBtn = document.getElementById('delete-btn') as HTMLButtonElement;
 const editor = document.getElementById('editor') as HTMLTextAreaElement;
 const formatBar = document.getElementById('format-bar')!;
 const settingsBtn = document.getElementById('settings-btn')!;
@@ -170,6 +171,7 @@ function showEmpty() {
   reloadBtn.disabled = true;
   editBtn.disabled = true;
   saveBtn.disabled = true;
+  deleteBtn.disabled = true;
   filepath.textContent = '';
   appWindow.setTitle('mdcrud').catch(() => {});
   invoke<string[]>('get_recent_files').then(renderRecent).catch(() => {});
@@ -180,6 +182,8 @@ function updateStatus() {
   const dirty = active ? isDirty(active) : false;
   saveBtn.disabled = !dirty;
   saveBtn.classList.toggle('dirty', dirty);
+  // Delete acts on the on-disk file, so it's only available once saved.
+  deleteBtn.disabled = !(active && active.path);
   filepath.textContent = '';
   // Window title shows the file name; the toolbar shows the full (~) path.
   appWindow.setTitle(active ? active.name : 'mdcrud').catch(() => {});
@@ -290,10 +294,9 @@ async function openFile(path: string) {
   invoke<string[]>('add_recent_file', { path }).then(renderRecent).catch(() => {});
 }
 
-async function closeDoc(doc: Doc) {
-  if (isDirty(doc) && !confirm(`「${doc.name}」は未保存です。閉じますか？`)) {
-    return;
-  }
+// Drop a document from the session (no prompting), switching away if it was
+// active. Shared by close and delete.
+async function removeDoc(doc: Doc) {
   const idx = docs.indexOf(doc);
   if (idx === -1) return;
   docs.splice(idx, 1);
@@ -305,6 +308,36 @@ async function closeDoc(doc: Doc) {
   }
   renderSidebar();
   saveSession();
+}
+
+async function closeDoc(doc: Doc) {
+  if (isDirty(doc) && !confirm(`「${doc.name}」は未保存です。閉じますか？`)) {
+    return;
+  }
+  await removeDoc(doc);
+}
+
+// Move the active document's file to the trash (the Delete of CRUD), then drop
+// it from the session. Recoverable from the system Trash if it was a mistake.
+async function deleteActive() {
+  if (!active || !active.path) return;
+  const doc = active;
+  const ok = await confirmDialog(`「${doc.name}」をゴミ箱に移動します。`, {
+    title: 'ファイルを削除',
+    kind: 'warning',
+    okLabel: 'ゴミ箱に入れる',
+    cancelLabel: 'キャンセル',
+  });
+  if (!ok) return;
+  try {
+    await invoke('delete_file', { path: doc.path });
+  } catch (e) {
+    filepath.textContent = `削除できませんでした: ${e}`;
+    return;
+  }
+  await removeDoc(doc);
+  // Refresh the recent list (the backend dropped the deleted path).
+  invoke<string[]>('get_recent_files').then(renderRecent).catch(() => {});
 }
 
 // Create a new, empty "untitled" document and start editing it.
@@ -420,6 +453,7 @@ openBtn.addEventListener('click', async () => {
 newBtn.addEventListener('click', newDoc);
 reloadBtn.addEventListener('click', reload);
 saveBtn.addEventListener('click', save);
+deleteBtn.addEventListener('click', deleteActive);
 editBtn.addEventListener('click', () => {
   if (active) setEditing(!isEditing);
 });
@@ -691,6 +725,11 @@ document.addEventListener('keydown', async (e) => {
   } else if (e.key === 'i' && active && isEditing) {
     e.preventDefault();
     applyFmt('italic');
+  } else if (e.key === 'Backspace' && active?.path && document.activeElement !== editor) {
+    // ⌘⌫ trashes the file — but only outside the editor, where it would
+    // otherwise be the native "delete to start of line".
+    e.preventDefault();
+    deleteActive();
   }
 });
 

@@ -35,6 +35,27 @@ fn save_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+/// Move a Markdown file to the OS trash (the Delete of CRUD) and drop it from
+/// the recent-files list. Uses the trash, not an unrecoverable delete, so a
+/// misclick is recoverable from the system's Trash/Recycle Bin.
+#[tauri::command]
+fn delete_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if !is_supported(&path) {
+        return Err("Unsupported file type".to_string());
+    }
+    trash::delete(&path).map_err(|e| e.to_string())?;
+    if let Some(store) = recent_store(&app) {
+        let list: Vec<String> = get_recent_files(app.clone())
+            .into_iter()
+            .filter(|p| p != &path)
+            .collect();
+        if let Ok(json) = serde_json::to_string(&list) {
+            let _ = std::fs::write(store, json);
+        }
+    }
+    Ok(())
+}
+
 /// Last-modified time of a file in milliseconds, used by the frontend to poll
 /// for external edits and auto-reload.
 #[tauri::command]
@@ -118,6 +139,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file,
             save_file,
+            delete_file,
             file_mtime,
             get_recent_files,
             add_recent_file,

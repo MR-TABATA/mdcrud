@@ -6,6 +6,7 @@ A minimal, fast Markdown viewer built with Tauri + TypeScript.
 
 - Open and render Markdown files (`.md`, `.markdown`, `.txt`)
 - Create a new document (`⌘N`) and save it anywhere via a save dialog; an untitled doc's first `#` heading is offered as the file name
+- Delete the current file to the system Trash (`⌘⌫` or the trash button), with a confirmation — recoverable from the Trash if it was a mistake
 - Edit with a split editor + live preview (`⌘E` to toggle), save with `⌘S`; drag the divider to resize the panes
 - Formatting toolbar above the editor: bold (`⌘B`), italic (`⌘I`), heading, list, quote, link, and more — each toggles/inserts the Markdown syntax around the selection (undoable with `⌘Z`)
 - Customise the toolbar in Settings (`⌘,`): turn any of the 14 Markdown actions (strikethrough, ordered/checklist, code block, image, table, horizontal rule, …) on or off; the choice is remembered

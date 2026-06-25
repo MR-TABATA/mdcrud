@@ -242,6 +242,8 @@ body.sidebar-hidden #sidebar { display: none; }
 }
 .content-area.resizing { user-select: none; cursor: col-resize; }
 
+#delete-btn:hover:not(:disabled) { background: #5a2a2a; color: #ff8a8a; border-color: #7a3a3a; }
+
 #save-btn.dirty { background: #0d6efd; color: #fff; border-color: #0d6efd; }
 #filepath .dirty-dot { color: #0d6efd; margin-right: 5px; }
 
