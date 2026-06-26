@@ -352,7 +352,8 @@ body.sidebar-hidden #sidebar { display: none; }
 }
 .opt-group-title { font-size: 11px; color: #666; margin: 14px 0 4px; }
 .opt-group-title:first-child { margin-top: 4px; }
-#toolbar-options label {
+#toolbar-options label,
+#lang-options label {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -362,8 +363,10 @@ body.sidebar-hidden #sidebar { display: none; }
   color: #ccc;
   font-size: 13px;
 }
-#toolbar-options label:hover { background: #2d2d2d; }
-#toolbar-options input { accent-color: #0d6efd; width: 15px; height: 15px; flex-shrink: 0; }
+#toolbar-options label:hover,
+#lang-options label:hover { background: #2d2d2d; }
+#toolbar-options input,
+#lang-options input { accent-color: #0d6efd; width: 15px; height: 15px; flex-shrink: 0; }
 .opt-icon { display: inline-flex; width: 18px; color: #9a9a9a; }
 .opt-icon svg { width: 16px; height: 16px; }
 

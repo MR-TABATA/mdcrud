@@ -9,6 +9,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { SUPPORTED, isSupported, basename, tildify, resolveImagePath, sanitizeFilename } from './paths';
 import { slugify, firstHeadingTitle } from './markdown';
+import { t, getLang, setLang, isSystemLang, type Lang, type Key } from './i18n';
 import {
   toggleWrap,
   toggleLinePrefix,
@@ -34,6 +35,7 @@ const settingsBtn = document.getElementById('settings-btn')!;
 const settingsOverlay = document.getElementById('settings-overlay') as HTMLElement;
 const settingsClose = document.getElementById('settings-close')!;
 const toolbarOptions = document.getElementById('toolbar-options')!;
+const langOptions = document.getElementById('lang-options')!;
 const output = document.getElementById('output')!;
 const emptyState = document.getElementById('empty-state')!;
 const recentBox = document.getElementById('recent')!;
@@ -200,7 +202,7 @@ function updateStatus() {
 function setEditing(on: boolean) {
   isEditing = on;
   contentArea.classList.toggle('editing', on);
-  editLabel.textContent = on ? 'プレビュー' : '編集';
+  editLabel.textContent = on ? t('preview') : t('edit');
   if (on) editor.focus();
 }
 
@@ -222,7 +224,7 @@ function renderSidebar() {
     close.className = 'doc-close';
     close.innerHTML =
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
-    close.title = '閉じる';
+    close.title = t('close');
     close.addEventListener('click', (e) => {
       e.stopPropagation();
       closeDoc(doc);
@@ -276,7 +278,7 @@ async function openFile(path: string) {
   try {
     content = await invoke<string>('read_file', { path });
   } catch (e) {
-    filepath.textContent = `開けませんでした: ${e}`;
+    filepath.textContent = t('openFailed', { e: String(e) });
     return;
   }
   const mtime = await invoke<number>('file_mtime', { path }).catch(() => 0);
@@ -311,7 +313,7 @@ async function removeDoc(doc: Doc) {
 }
 
 async function closeDoc(doc: Doc) {
-  if (isDirty(doc) && !confirm(`「${doc.name}」は未保存です。閉じますか？`)) {
+  if (isDirty(doc) && !confirm(t('closeConfirm', { name: doc.name }))) {
     return;
   }
   await removeDoc(doc);
@@ -322,17 +324,17 @@ async function closeDoc(doc: Doc) {
 async function deleteActive() {
   if (!active || !active.path) return;
   const doc = active;
-  const ok = await confirmDialog(`「${doc.name}」をゴミ箱に移動します。`, {
-    title: 'ファイルを削除',
+  const ok = await confirmDialog(t('deleteConfirm', { name: doc.name }), {
+    title: t('deleteTitle'),
     kind: 'warning',
-    okLabel: 'ゴミ箱に入れる',
-    cancelLabel: 'キャンセル',
+    okLabel: t('deleteOk'),
+    cancelLabel: t('cancel'),
   });
   if (!ok) return;
   try {
     await invoke('delete_file', { path: doc.path });
   } catch (e) {
-    filepath.textContent = `削除できませんでした: ${e}`;
+    filepath.textContent = t('deleteFailed', { e: String(e) });
     return;
   }
   await removeDoc(doc);
@@ -380,7 +382,7 @@ async function save() {
   try {
     await invoke('save_file', { path, content: active.workingText });
   } catch (e) {
-    filepath.textContent = `保存できませんでした: ${e}`;
+    filepath.textContent = t('saveFailed', { e: String(e) });
     return;
   }
 
@@ -424,7 +426,7 @@ function renderRecent(list: string[]) {
   if (!list || list.length === 0) return;
   const title = document.createElement('div');
   title.className = 'recent-title';
-  title.textContent = '最近のファイル';
+  title.textContent = t('recentTitle');
   recentBox.appendChild(title);
   const ul = document.createElement('ul');
   for (const p of list) {
@@ -504,7 +506,9 @@ function replaceEditorText(newText: string, selStart: number, selEnd: number) {
 // transforms the current selection. Registry order is the display order.
 interface FmtAction {
   id: string;
-  title: string;
+  titleKey: 'fmtBold' | 'fmtItalic' | 'fmtStrike' | 'fmtCode' | 'fmtLink' | 'fmtImage'
+    | 'fmtHeading' | 'fmtList' | 'fmtOrdered' | 'fmtChecklist' | 'fmtQuote'
+    | 'fmtCodeblock' | 'fmtTable' | 'fmtHr';
   group: 'inline' | 'block';
   svg: string;
   run: (s: Sel) => Sel;
@@ -515,52 +519,52 @@ const ICON =
     `<svg viewBox="0 0 24 24" ${attrs}>${paths}</svg>`;
 
 const FMT_ACTIONS: FmtAction[] = [
-  { id: 'bold', title: '太字', group: 'inline',
+  { id: 'bold', titleKey: 'fmtBold', group: 'inline',
     svg: ICON('<path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>'),
     run: (s) => toggleWrap(s, '**') },
-  { id: 'italic', title: '斜体', group: 'inline',
+  { id: 'italic', titleKey: 'fmtItalic', group: 'inline',
     svg: ICON('<line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/>'),
     run: (s) => toggleWrap(s, '*') },
-  { id: 'strike', title: '取り消し線', group: 'inline',
+  { id: 'strike', titleKey: 'fmtStrike', group: 'inline',
     svg: ICON('<path d="M16 5H9a3 3 0 0 0-2.8 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" y1="12" x2="20" y2="12"/>'),
     run: (s) => toggleWrap(s, '~~') },
-  { id: 'code', title: 'コード', group: 'inline',
+  { id: 'code', titleKey: 'fmtCode', group: 'inline',
     svg: ICON('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>'),
     run: (s) => toggleWrap(s, '`') },
-  { id: 'link', title: 'リンク', group: 'inline',
+  { id: 'link', titleKey: 'fmtLink', group: 'inline',
     svg: ICON('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
     run: (s) => insertLink(s) },
-  { id: 'image', title: '画像', group: 'inline',
+  { id: 'image', titleKey: 'fmtImage', group: 'inline',
     svg: ICON('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>'),
     run: (s) => insertImage(s) },
-  { id: 'heading', title: '見出し', group: 'block',
+  { id: 'heading', titleKey: 'fmtHeading', group: 'block',
     svg: ICON('<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>'),
     run: (s) => toggleLinePrefix(s, '# ', /^#{1,6} /) },
-  { id: 'list', title: 'リスト', group: 'block',
+  { id: 'list', titleKey: 'fmtList', group: 'block',
     svg: ICON('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'),
     run: (s) => toggleLinePrefix(s, '- ', /^[-*+] /) },
-  { id: 'ordered', title: '番号付きリスト', group: 'block',
+  { id: 'ordered', titleKey: 'fmtOrdered', group: 'block',
     svg: ICON('<line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18v-1a1 1 0 0 0-2 0M4 18h2"/>'),
     run: (s) => toggleLinePrefix(s, '1. ', /^\d+\. /) },
-  { id: 'checklist', title: 'チェックリスト', group: 'block',
+  { id: 'checklist', titleKey: 'fmtChecklist', group: 'block',
     svg: ICON('<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
     run: (s) => toggleLinePrefix(s, '- [ ] ', /^[-*+] \[[ xX]\] /) },
-  { id: 'quote', title: '引用', group: 'block',
+  { id: 'quote', titleKey: 'fmtQuote', group: 'block',
     svg: ICON('<path d="M7 17h3l2-4V7H6v6h3zm8 0h3l2-4V7h-6v6h3z"/>', 'fill="currentColor" stroke="none"'),
     run: (s) => toggleLinePrefix(s, '> ', /^> /) },
-  { id: 'codeblock', title: 'コードブロック', group: 'block',
+  { id: 'codeblock', titleKey: 'fmtCodeblock', group: 'block',
     svg: ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="9 9 7 12 9 15"/><polyline points="15 9 17 12 15 15"/>'),
     run: (s) => insertFence(s) },
-  { id: 'table', title: '表', group: 'block',
+  { id: 'table', titleKey: 'fmtTable', group: 'block',
     svg: ICON('<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>'),
     run: (s) => insertTable(s) },
-  { id: 'hr', title: '水平線', group: 'block',
+  { id: 'hr', titleKey: 'fmtHr', group: 'block',
     svg: ICON('<line x1="3" y1="12" x2="21" y2="12"/>'),
     run: (s) => insertHr(s) },
 ];
 const FMT_BY_ID = new Map(FMT_ACTIONS.map((a) => [a.id, a]));
 const FMT_DEFAULT = ['heading', 'bold', 'italic', 'code', 'list', 'quote', 'link'];
-const GROUP_LABEL: Record<FmtAction['group'], string> = { inline: 'インライン', block: 'ブロック' };
+const groupLabel = (g: FmtAction['group']) => t(g === 'inline' ? 'groupInline' : 'groupBlock');
 
 // Which buttons the user has chosen to show, persisted across sessions and
 // always kept in registry order.
@@ -593,7 +597,7 @@ function renderFormatBar() {
     const btn = document.createElement('button');
     btn.dataset.fmt = a.id;
     const key = a.id === 'bold' ? ' (⌘B)' : a.id === 'italic' ? ' (⌘I)' : '';
-    btn.title = a.title + key;
+    btn.title = t(a.titleKey) + key;
     btn.innerHTML = a.svg;
     formatBar.appendChild(btn);
   }
@@ -634,7 +638,7 @@ function buildToolbarOptions() {
     if (a.group !== prevGroup) {
       const head = document.createElement('div');
       head.className = 'opt-group-title';
-      head.textContent = GROUP_LABEL[a.group];
+      head.textContent = groupLabel(a.group);
       toolbarOptions.appendChild(head);
       prevGroup = a.group;
     }
@@ -655,14 +659,62 @@ function buildToolbarOptions() {
     icon.className = 'opt-icon';
     icon.innerHTML = a.svg;
     const name = document.createElement('span');
-    name.textContent = a.title;
+    name.textContent = t(a.titleKey);
     label.append(cb, icon, name);
     toolbarOptions.appendChild(label);
   }
 }
 
+// Language picker: System (follow the OS) / 日本語 / English.
+function buildLangOptions() {
+  const choices: Array<{ value: Lang | 'system'; label: string }> = [
+    { value: 'system', label: t('langSystem') },
+    { value: 'ja', label: '日本語' },
+    { value: 'en', label: 'English' },
+  ];
+  const current: Lang | 'system' = isSystemLang() ? 'system' : getLang();
+  langOptions.innerHTML = '';
+  for (const c of choices) {
+    const label = document.createElement('label');
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'lang';
+    radio.checked = c.value === current;
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      setLang(c.value);
+      applyI18n();
+    });
+    const name = document.createElement('span');
+    name.textContent = c.label;
+    label.append(radio, name);
+    langOptions.appendChild(label);
+  }
+}
+
+// Re-localise the whole UI: static [data-i18n]/[data-i18n-title] nodes plus the
+// pieces built in JS. Called on startup and whenever the language changes.
+function applyI18n() {
+  document.documentElement.lang = getLang();
+  document.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n as Key);
+  });
+  document.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((el) => {
+    el.title = t(el.dataset.i18nTitle as Key);
+  });
+  renderFormatBar();
+  editLabel.textContent = isEditing ? t('preview') : t('edit');
+  if (active) renderSidebar();
+  buildToolbarOptions();
+  buildLangOptions();
+  invoke<string[]>('get_recent_files').then(renderRecent).catch(() => {});
+  // Keep the native menu in the same language.
+  invoke('apply_menu', { lang: getLang() }).catch(() => {});
+}
+
 function openSettings() {
   buildToolbarOptions();
+  buildLangOptions();
   settingsOverlay.hidden = false;
 }
 function closeSettings() {
@@ -675,7 +727,7 @@ settingsOverlay.addEventListener('click', (e) => {
   if (e.target === settingsOverlay) closeSettings();
 });
 
-renderFormatBar();
+applyI18n();
 
 // --- Sidebar visibility (default shown, persisted when hidden) ---
 const SIDEBAR_KEY = 'mdcrud.sidebar';
@@ -686,40 +738,16 @@ sidebarBtn.addEventListener('click', () => {
   localStorage.setItem(SIDEBAR_KEY, hidden ? 'hidden' : 'shown');
 });
 
-document.addEventListener('keydown', async (e) => {
+// Most shortcuts (⌘N/O/S/R/W/E/1/,) are owned by the native menu accelerators
+// now; only editor-context keys that no menu item claims live here.
+document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsOverlay.hidden) {
     closeSettings();
     return;
   }
   const mod = e.metaKey || e.ctrlKey;
   if (!mod) return;
-  if (e.key === ',') {
-    e.preventDefault();
-    settingsOverlay.hidden ? openSettings() : closeSettings();
-    return;
-  }
-  if (e.key === 'o') {
-    e.preventDefault();
-    openBtn.click();
-  } else if (e.key === 'n') {
-    e.preventDefault();
-    newDoc();
-  } else if (e.key === 's') {
-    e.preventDefault();
-    await save();
-  } else if (e.key === 'e' && active) {
-    e.preventDefault();
-    setEditing(!isEditing);
-  } else if (e.key === 'r') {
-    e.preventDefault();
-    await reload();
-  } else if (e.key === '1') {
-    e.preventDefault();
-    sidebarBtn.click();
-  } else if (e.key === 'w' && active) {
-    e.preventDefault();
-    closeDoc(active);
-  } else if (e.key === 'b' && active && isEditing) {
+  if (e.key === 'b' && active && isEditing) {
     e.preventDefault();
     applyFmt('bold');
   } else if (e.key === 'i' && active && isEditing) {
@@ -833,6 +861,22 @@ async function restoreSession() {
 // Runtime opens (app already running) arrive as an event.
 listen<string>('open-file', (e) => {
   if (e.payload) openFile(e.payload);
+});
+
+// Native menu clicks/accelerators arrive here; map ids to the same actions as
+// the toolbar. (Predefined items like Undo/Copy are handled natively.)
+listen<string>('menu', (e) => {
+  switch (e.payload) {
+    case 'new': newDoc(); break;
+    case 'open': openBtn.click(); break;
+    case 'save': save(); break;
+    case 'reload': reload(); break;
+    case 'delete': deleteActive(); break;
+    case 'close': if (active) closeDoc(active); break;
+    case 'sidebar': sidebarBtn.click(); break;
+    case 'edit': if (active) setEditing(!isEditing); break;
+    case 'settings': openSettings(); break;
+  }
 });
 
 // Restore the previous session first, then open any file the app was launched

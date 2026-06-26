@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
 const ALLOWED_EXTENSIONS: [&str; 3] = ["md", "markdown", "txt"];
@@ -130,6 +131,100 @@ fn handle_opened_file(app: &tauri::AppHandle, path: String) {
     let _ = app.emit("open-file", path);
 }
 
+/// Build the native menu in the given language ("ja" or anything else = en).
+/// Custom items carry stable ids that the frontend maps back to actions; the
+/// About item shows the compiled crate version so it can never go stale.
+fn build_menu(app: &tauri::AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
+    let ja = lang == "ja";
+    let pick = |j: &'static str, e: &'static str| -> &'static str { if ja { j } else { e } };
+    let sep = || PredefinedMenuItem::separator(app);
+
+    let about_meta = AboutMetadata {
+        name: Some("mdcrud".into()),
+        version: Some(env!("CARGO_PKG_VERSION").into()),
+        ..Default::default()
+    };
+    let app_menu = Submenu::with_items(
+        app,
+        "mdcrud",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some(pick("mdcrud について", "About mdcrud")), Some(about_meta))?,
+            &sep()?,
+            &MenuItem::with_id(app, "settings", pick("設定…", "Settings…"), true, Some("CmdOrCtrl+,"))?,
+            &sep()?,
+            &PredefinedMenuItem::hide(app, Some(pick("mdcrud を隠す", "Hide mdcrud")))?,
+            &PredefinedMenuItem::hide_others(app, Some(pick("ほかを隠す", "Hide Others")))?,
+            &PredefinedMenuItem::show_all(app, Some(pick("すべてを表示", "Show All")))?,
+            &sep()?,
+            &PredefinedMenuItem::quit(app, Some(pick("mdcrud を終了", "Quit mdcrud")))?,
+        ],
+    )?;
+
+    let file_menu = Submenu::with_items(
+        app,
+        pick("ファイル", "File"),
+        true,
+        &[
+            &MenuItem::with_id(app, "new", pick("新規", "New"), true, Some("CmdOrCtrl+N"))?,
+            &MenuItem::with_id(app, "open", pick("開く…", "Open…"), true, Some("CmdOrCtrl+O"))?,
+            &sep()?,
+            &MenuItem::with_id(app, "save", pick("保存", "Save"), true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(app, "reload", pick("再読み込み", "Reload"), true, Some("CmdOrCtrl+R"))?,
+            &sep()?,
+            // No accelerator: ⌘⌫ stays the editor's "delete to line start".
+            &MenuItem::with_id(app, "delete", pick("ゴミ箱に移動", "Move to Trash"), true, None::<&str>)?,
+            &MenuItem::with_id(app, "close", pick("閉じる", "Close"), true, Some("CmdOrCtrl+W"))?,
+        ],
+    )?;
+
+    let edit_menu = Submenu::with_items(
+        app,
+        pick("編集", "Edit"),
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some(pick("取り消す", "Undo")))?,
+            &PredefinedMenuItem::redo(app, Some(pick("やり直す", "Redo")))?,
+            &sep()?,
+            &PredefinedMenuItem::cut(app, Some(pick("カット", "Cut")))?,
+            &PredefinedMenuItem::copy(app, Some(pick("コピー", "Copy")))?,
+            &PredefinedMenuItem::paste(app, Some(pick("ペースト", "Paste")))?,
+            &PredefinedMenuItem::select_all(app, Some(pick("すべてを選択", "Select All")))?,
+        ],
+    )?;
+
+    let view_menu = Submenu::with_items(
+        app,
+        pick("表示", "View"),
+        true,
+        &[
+            &MenuItem::with_id(app, "sidebar", pick("サイドバー", "Sidebar"), true, Some("CmdOrCtrl+1"))?,
+            &MenuItem::with_id(app, "edit", pick("編集 / プレビュー", "Edit / Preview"), true, Some("CmdOrCtrl+E"))?,
+        ],
+    )?;
+
+    let window_menu = Submenu::with_items(
+        app,
+        pick("ウインドウ", "Window"),
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, Some(pick("しまう", "Minimize")))?,
+            &PredefinedMenuItem::maximize(app, Some(pick("拡大／縮小", "Zoom")))?,
+        ],
+    )?;
+
+    Menu::with_items(app, &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
+}
+
+/// Rebuild and apply the menu in the requested language (called by the frontend
+/// on startup and whenever the in-app language changes).
+#[tauri::command]
+fn apply_menu(app: tauri::AppHandle, lang: String) -> Result<(), String> {
+    let menu = build_menu(&app, &lang).map_err(|e| e.to_string())?;
+    app.set_menu(menu).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -143,13 +238,25 @@ pub fn run() {
             file_mtime,
             get_recent_files,
             add_recent_file,
-            get_pending_file
+            get_pending_file,
+            apply_menu
         ])
+        .on_menu_event(|app, event| {
+            // Forward our custom item ids to the frontend, which maps them to
+            // actions. Predefined items (undo/copy/…) are handled natively.
+            let _ = app.emit("menu", event.id().as_ref());
+        })
         .setup(|app| {
             #[cfg(desktop)]
             {
                 let window = app.get_webview_window("main").unwrap();
                 window.set_title("mdcrud").unwrap();
+
+                // Initial menu; the frontend re-applies it in its resolved
+                // language (OS locale or the saved override) right after load.
+                if let Ok(menu) = build_menu(&app.handle(), "ja") {
+                    let _ = app.set_menu(menu);
+                }
 
                 // Windows / Linux pass the file path as a launch argument.
                 #[cfg(not(target_os = "macos"))]
