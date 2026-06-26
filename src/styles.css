@@ -286,6 +286,21 @@ body.sidebar-hidden #sidebar { display: none; }
   border-radius: 8px; padding: 16px; overflow-x: auto; margin: 1em 0;
 }
 #output pre code { background: none; padding: 0; color: #d4d4d4; }
+/* highlight.js tokens — tuned to the surrounding VSCode-dark palette */
+#output .hljs-comment, #output .hljs-quote { color: #6a9955; font-style: italic; }
+#output .hljs-keyword, #output .hljs-built_in, #output .hljs-literal { color: #569cd6; }
+#output .hljs-string, #output .hljs-regexp { color: #ce9178; }
+#output .hljs-number { color: #b5cea8; }
+#output .hljs-title, #output .hljs-title.function_, #output .hljs-section { color: #dcdcaa; }
+#output .hljs-title.class_, #output .hljs-type, #output .hljs-class .hljs-title { color: #4ec9b0; }
+#output .hljs-attr, #output .hljs-attribute, #output .hljs-variable, #output .hljs-property { color: #9cdcfe; }
+#output .hljs-tag, #output .hljs-name, #output .hljs-selector-tag { color: #569cd6; }
+#output .hljs-meta { color: #c586c0; }
+#output .hljs-symbol, #output .hljs-bullet, #output .hljs-link { color: #d7ba7d; }
+#output .hljs-deletion { color: #f48771; }
+#output .hljs-addition { color: #b5cea8; }
+#output .hljs-emphasis { font-style: italic; }
+#output .hljs-strong { font-weight: 600; }
 #output blockquote { border-left: 3px solid #444; margin: 1em 0; padding: 4px 16px; color: #888; }
 #output ul, #output ol { padding-left: 1.5em; margin: 0.6em 0; }
 #output li { margin: 0.2em 0; }

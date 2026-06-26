@@ -106,6 +106,27 @@ function getMermaid() {
   return mermaidLoader;
 }
 
+// Lazily load highlight.js (the smaller "common" bundle of ~35 languages) only
+// when a document actually has a code block, mirroring the Mermaid loader.
+let hljsLoader: Promise<typeof import('highlight.js/lib/common')['default']> | null = null;
+function getHljs() {
+  if (!hljsLoader) {
+    hljsLoader = import('highlight.js/lib/common').then(({ default: hljs }) => hljs);
+  }
+  return hljsLoader;
+}
+
+// Syntax-highlight fenced code blocks. Runs after sanitize, so the spans
+// highlight.js injects are our own trusted output, not user HTML. Mermaid
+// blocks are skipped — renderMermaid() replaces those with diagrams instead.
+async function highlightCode() {
+  const blocks = (Array.from(output.querySelectorAll('pre code')) as HTMLElement[])
+    .filter((b) => !b.classList.contains('language-mermaid'));
+  if (blocks.length === 0) return;
+  const hljs = await getHljs();
+  for (const block of blocks) hljs.highlightElement(block);
+}
+
 // Turn ```mermaid code blocks into rendered diagrams (falling back to the
 // source on error so a bad diagram never blanks the document).
 async function renderMermaid() {
@@ -152,6 +173,7 @@ async function renderSource(source: string, filePath: string) {
   output.innerHTML = DOMPurify.sanitize(html);
   addHeadingIds();
   resolveLocalImages(filePath);
+  await highlightCode();
   await renderMermaid();
 }
 
